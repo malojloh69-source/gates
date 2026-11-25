@@ -226,14 +226,20 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
         player=document.createElement('lottie-player');
         for(const [key,value]of Object.entries({background:'transparent',renderer:'svg',loop:'','aria-hidden':'true'}))player.setAttribute(key,value);
         const failed=()=>{target.dataset.motionFailed='1';target.classList.remove('market-motion-ready');player.remove();};
-        player.addEventListener('load',()=>{if(player.isConnected){target.classList.add('market-motion-ready');update();}});
+        const ready=()=>{if(player.isConnected){target.classList.add('market-motion-ready');update();}};
+        player.addEventListener('load',ready);
+        player.addEventListener('ready',ready);
         player.addEventListener('error',failed);
         target.append(player);
         customElements.whenDefined('lottie-player').then(async()=>{
           const data=window.GatesMarketMotion
             ?await window.GatesMarketMotion(target.dataset.marketMotion)
             :`/static/market-motion/${target.dataset.marketMotion}.json`;
-          if(player.isConnected)await player.load(data);
+          if(player.isConnected){
+            await player.updateComplete;
+            await player.load(data);
+            if(typeof data==='object')ready();
+          }
         }).catch(failed);
       });
     };
