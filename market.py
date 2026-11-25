@@ -44,6 +44,10 @@ OFFER_ROWS = '''(SELECT g.gift_id AS id,g.name,g.number,g.image_id,s.currency,s.
     FROM accounts.market_resales s JOIN accounts.market_gifts g ON g.user_id=s.seller_id AND g.gift_id=s.gift_id
     LEFT JOIN main.listing m ON m.id=g.gift_id WHERE s.status='active')'''
 FILTER_FIELDS = {'collection': 'name', 'model': 'model', 'backdrop': 'backdrop', 'symbol': 'symbol'}
+EXCLUDED_TRAITS = '''(
+    (listing.model = 'Maneki Neko' OR listing.model GLOB 'Maneki Neko (*)')
+    AND (listing.backdrop = 'Jade Green' OR listing.backdrop GLOB 'Jade Green (*)')
+)'''
 MEDIA_MEMBER = re.compile(r'dist/(?:media/[a-zA-Z0-9_.-]+|gifts/originals/[0-9]+/Original\.png)')
 
 
@@ -66,7 +70,7 @@ def equivalent(price, source_currency, currency):
 def purchase(user_id, ids):
     placeholders = ','.join('?' for _ in ids)
     with catalog() as connection:
-        rows = connection.execute(f'SELECT * FROM listing WHERE id IN ({placeholders})', ids).fetchall()
+        rows = connection.execute(f'SELECT * FROM listing WHERE id IN ({placeholders}) AND NOT {EXCLUDED_TRAITS}', ids).fetchall()
     if len(rows) != len(ids):
         raise ValueError('Подарок не найден')
     totals, gifts = {}, []
@@ -89,10 +93,19 @@ def purchase(user_id, ids):
             db.log(connection, user_id, 'market_purchase', currency, total)
 
 
+def excluded_gift(gift_id):
+    if not CATALOG.is_file():
+        return False
+    with catalog() as connection:
+        return connection.execute(f'SELECT 1 FROM listing WHERE id=? AND {EXCLUDED_TRAITS}', (gift_id,)).fetchone() is not None
+
+
 def put_offer(seller, gift_id, currency, amount, previous=None):
     with db.tx() as connection:
         if not connection.execute('SELECT 1 FROM market_gifts WHERE user_id=? AND gift_id=?', (seller,gift_id)).fetchone():
             raise LookupError('Подарок не найден')
+        if excluded_gift(gift_id):
+            raise LookupError('Продажа сейчас недоступна')
         current = connection.execute("SELECT id FROM market_resales WHERE seller_id=? AND gift_id=? AND status='active'", (seller,gift_id)).fetchone()
         if (current['id'] if current else None) != previous:
             raise LookupError('Лот уже изменился. Обновите Маркет.')
@@ -113,7 +126,7 @@ def buy_offer(buyer, offer_id):
     with db.tx() as connection:
         row = connection.execute('''SELECT s.*,g.name,g.number,g.image_id FROM market_resales s JOIN market_gifts g
             ON g.user_id=s.seller_id AND g.gift_id=s.gift_id WHERE s.id=? AND s.status='active' ''', (offer_id,)).fetchone()
-        if not row:
+        if not row or excluded_gift(row['gift_id']):
             raise LookupError('Лот уже изменился. Обновите Маркет.')
         if row['seller_id'] == buyer:
             raise ValueError('Это ваш лот')
@@ -167,7 +180,7 @@ def listings():
         params['currency'] = ''
     page = min(3000, max(1, request.args.get('page', 1, type=int)))
     order = SORT.get(request.args.get('sort'), SORT['archive'])
-    conditions = []
+    conditions = [f'NOT {EXCLUDED_TRAITS}']
     if not offers:
         conditions.append('NOT EXISTS (SELECT 1 FROM accounts.market_gifts g WHERE g.gift_id = listing.id)')
     if params['currency']:
@@ -195,7 +208,7 @@ def listings():
         if bound is not None and 0 <= bound <= 1_000_000_000:
             params[key] = bound
             conditions.append(f'{TON_VALUE} {operator} :{key}')
-    where = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+    where = 'WHERE ' + ' AND '.join(conditions)
     with catalog() as connection:
         connection.execute('ATTACH DATABASE ? AS accounts', (Path(config.DB_PATH).resolve().as_uri() + '?mode=ro',))
         connection.execute('BEGIN')
@@ -216,7 +229,7 @@ def options():
     result = {}
     with catalog() as connection:
         for key, field in FILTER_FIELDS.items():
-            clauses, values = f'{field} <> ?', ['']
+            clauses, values = f'{field} <> ? AND NOT {EXCLUDED_TRAITS}', ['']
             if collection and key != 'collection':
                 clauses += ' AND name = ?'
                 values.append(collection)
@@ -238,14 +251,14 @@ def previews(kind):
     with catalog() as connection:
         rows = connection.execute(f'''
             WITH ranked AS (
-                SELECT l.{field} AS value, i.id AS image_id, i.motion,
-                    l.image_kind, a.image_id AS model_art,
-                    ROW_NUMBER() OVER (PARTITION BY l.{field}
-                        ORDER BY l.image_kind DESC, (i.motion <> '') DESC, l.position) AS rank
-                FROM listing l
-                LEFT JOIN model_art a ON :kind = 'model' AND a.collection = l.name AND a.model = l.model
-                LEFT JOIN image i ON i.id = COALESCE(a.image_id, l.image_id)
-                WHERE l.{field} <> '' AND (:collection = '' OR l.name = :collection)
+                SELECT listing.{field} AS value, i.id AS image_id, i.motion,
+                    listing.image_kind, a.image_id AS model_art,
+                    ROW_NUMBER() OVER (PARTITION BY listing.{field}
+                        ORDER BY listing.image_kind DESC, (i.motion <> '') DESC, listing.position) AS rank
+                FROM listing
+                LEFT JOIN model_art a ON :kind = 'model' AND a.collection = listing.name AND a.model = listing.model
+                LEFT JOIN image i ON i.id = COALESCE(a.image_id, listing.image_id)
+                WHERE listing.{field} <> '' AND (:collection = '' OR listing.name = :collection) AND NOT {EXCLUDED_TRAITS}
             )
             SELECT * FROM ranked WHERE rank = 1 ORDER BY value COLLATE NOCASE
         ''', {'collection': collection, 'kind': kind}).fetchall()
@@ -278,8 +291,9 @@ def gift(gift_id):
     if -2**63 <= gift_id < 2**63 and db.row('SELECT 1 FROM market_gifts WHERE gift_id = ? LIMIT 1', (gift_id,)):
         return jsonify(error='Этот подарок уже куплен'), 404
     with catalog() as connection:
-        row = connection.execute("SELECT listing.*, COALESCE(image.motion, '') AS motion FROM listing LEFT JOIN image ON image.id=listing.image_id WHERE listing.id=?",
-                                 (str(gift_id),)).fetchone()
+        row = connection.execute(f"""SELECT listing.*, COALESCE(image.motion, '') AS motion FROM listing
+                                     LEFT JOIN image ON image.id=listing.image_id
+                                     WHERE listing.id=? AND NOT {EXCLUDED_TRAITS}""", (str(gift_id),)).fetchone()
     if row is None:
         return jsonify(error='Не найдено'), 404
     item = listing(row)
@@ -291,11 +305,11 @@ def gift(gift_id):
             if not row[field]:
                 continue
             conditions = f'{field}=:trait' + (' AND name=:collection' if field == 'model' else '')
-            value = connection.execute(f'SELECT MIN({TON_VALUE}) FROM listing WHERE {conditions}',
+            value = connection.execute(f'SELECT MIN({TON_VALUE}) FROM listing WHERE {conditions} AND NOT {EXCLUDED_TRAITS}',
                                        {**rate_params, 'trait': row[field], 'collection': row['name']}).fetchone()[0]
             if value is not None:
                 item['trait_prices'][field] = equivalent(str(value), 'TON', item['currency'])
-        average = connection.execute(f'SELECT AVG({TON_VALUE}) FROM listing WHERE name=:collection',
+        average = connection.execute(f'SELECT AVG({TON_VALUE}) FROM listing WHERE name=:collection AND NOT {EXCLUDED_TRAITS}',
                                      {**rate_params, 'collection': row['name']}).fetchone()[0]
         if average is not None:
             item['average_price'] = equivalent(str(average), 'TON', item['currency'])

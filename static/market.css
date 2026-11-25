@@ -6,14 +6,12 @@
 
 .market-header h1 { margin: 12px 0 5px; }
 .market-header p { margin: 0 0 18px; color: var(--mut); font-size: 13px; }
-.market-withdraw-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.market-withdraw-header h1 { margin: 0; }
-.market-withdraw-header .btn { flex-shrink: 0; }
-.market-withdraw-header .ic { width: 16px; height: 16px; }
 .market-withdraw { text-align: center; }
 .market-withdraw h2 { padding: 0 22px; }
-.market-withdraw video { display: block; width: 128px; height: 128px; margin: 16px auto; border-radius: 18px; background: #000; }
+.market-withdraw-animation, .market-withdraw-animation img { display: block; width: 128px; height: 128px; }
+.market-withdraw-animation { margin: 12px auto; }
 .market-withdraw p { font-size: 16px; line-height: 1.4; }
+.market-withdraw .market-withdraw-gift { margin: 6px 0 0; color: var(--mut); font-weight: 600; overflow-wrap: anywhere; }
 .market-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .market-heading .market-inventory { flex:none; margin-top:9px; border-radius:50%; background:var(--gs); }
 .market-inventory img { width:25px; height:25px; }
@@ -244,6 +242,7 @@
 .market-success .market-image { width:84px; margin:8px 0; }
 .market-owned-actions { display:grid; gap:4px; padding:3px; }
 .market-owned-actions .btn { min-height:34px; margin:0; padding:5px 4px; font-size:11px; }
+.market-owned-actions .market-withdraw-button .ic { width: 14px; height: 14px; }
 .market-owned-actions .text-button, .market-sale-state { font-size:11px; }
 .market-sale-state { color:#215d31; }
 .market-list-gift { margin:8px 0; }

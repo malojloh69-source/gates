@@ -237,6 +237,7 @@ select{appearance:none;padding-right:26px;background-image:url("data:image/svg+x
 .market-sheet .market-summary{border-radius:14px}
 .market-owned-card .market-image{height:auto;width:100%;margin:0}
 .market-owned-actions .btn{background:var(--gs);color:var(--g)}
+.market-owned-actions .btn.market-withdraw-button{background:var(--chip);color:var(--ink)}
 @media(min-width:600px){#app{border:1px solid #ffffff04;border-top:0}.sheet{border-radius:24px;max-width:480px}.sheet-wrap:not(.profile-drawer){align-items:center}.profile-drawer .sheet{margin-left:max(0px,calc((100vw - 480px)/2));border-left:1px solid var(--line)}.market-checkout-overlay .sheet{border-radius:24px}}
 @media(max-width:374px){#app{padding-left:9px;padding-right:9px}.gates-promo{padding-left:10px}.gates-promo small{font-size:9px}.gates-promo-art{margin-right:0}.market-name{font-size:14px}.market-control{padding:0 8px}.market-control small{font-size:13px}.market-card-buy .market-price strong{font-size:12px}.market-card .market-add-icon{width:32px}.account-profile{max-width:43%}.account-profile #account-name{font-size:13px}.balance-content .big{font-size:30px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}.balance-background{display:none}}
@@ -269,11 +270,11 @@ select{appearance:none;padding-right:26px;background-image:url("data:image/svg+x
 .gates-profile-balance strong{margin-top:4px}
 .gates-account-panel .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0}
 .profile-portfolio{margin-top:25px}
-.profile-portfolio .market-withdraw-header{border-bottom:1px solid var(--line);padding-bottom:14px}
-.profile-portfolio h2{font-size:18px;font-weight:550;margin:0}
+.profile-portfolio h2{font-size:18px;font-weight:550;border-bottom:1px solid var(--line);padding-bottom:14px;margin:0 0 14px}
 .profile-empty{min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:15px;color:var(--mut);font-size:14px}
 .profile-empty .ic{width:56px;height:56px;color:#5299cc;stroke-width:1.2}
-.profile-nft{text-align:left;min-width:0;padding:4px;border-radius:18px;background:var(--card)}
+.profile-nft-card{background:var(--card);border-radius:18px;padding:4px;min-width:0}
+.profile-nft{display:block;width:100%;padding:0;text-align:left;background:transparent}
 .profile-nft .market-image{width:100%;aspect-ratio:1;border-radius:15px;overflow:hidden}
 .profile-nft strong,.profile-nft small{display:block;padding:4px 5px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .profile-nft strong{font-size:15px}.profile-nft small{font-size:12px;color:var(--mut);padding-bottom:6px}

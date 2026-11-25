@@ -24,11 +24,42 @@ class CatalogTests(unittest.TestCase):
 
     def test_all_gifts_are_reachable_by_pagination(self):
         first = self.client.get('/api/market/listings').get_json()
-        self.assertEqual(first['total'], 45362)
-        self.assertEqual(first['pages'], 1891)
-        last = self.client.get('/api/market/listings?page=1891').get_json()
-        self.assertEqual(len(last['items']), 2)
+        self.assertEqual(first['total'], 45360)
+        self.assertEqual(first['pages'], 1890)
+        last = self.client.get('/api/market/listings?page=1890').get_json()
+        self.assertEqual(len(last['items']), market.PAGE_SIZE)
         self.assertTrue(any(item['id'] < 0 for item in last['items']))
+
+    def test_only_the_excluded_model_and_backdrop_combination_is_hidden(self):
+        excluded = (10540447, 2576794)
+        allowed = (2194808, 129216)
+        ids = ','.join(map(str, excluded + allowed))
+        listings = self.client.get(f'/api/market/listings?ids={ids}').get_json()
+        self.assertEqual({item['id'] for item in listings['items']}, set(allowed))
+        for gift_id in excluded:
+            self.assertEqual(self.client.get(f'/api/market/listings/{gift_id}').status_code, 404)
+        purchase = self.client.post('/api/market/buy', json={'ids': [excluded[0], allowed[0]]})
+        self.assertEqual(purchase.status_code, 400)
+        self.assertEqual(purchase.get_json()['error'], 'Подарок не найден')
+
+    def test_excluded_gift_can_stay_owned_but_cannot_be_sold(self):
+        gift_id = 10540447
+        with tempfile.TemporaryDirectory() as directory, patch.object(config, 'DB_PATH', str(Path(directory) / 'market.db')):
+            db.init()
+            with db.tx() as connection:
+                connection.execute('INSERT INTO market_gifts VALUES (?,?,?,?,?,?,?,?)',
+                                   (1, gift_id, 'Whip Cupcake', 86516, None, 'RUB', db.SCALE, 1))
+                resale = connection.execute("""INSERT INTO market_resales(seller_id,gift_id,currency,amount,created,status)
+                                                VALUES (1,?,'RUB',?,1,'active')""", (gift_id, db.SCALE)).lastrowid
+            gifts = self.client.get('/api/market/mine').get_json()
+            self.assertEqual([item['id'] for item in gifts], [gift_id])
+            listings = self.client.get(f'/api/market/listings?source=offers&ids={gift_id}').get_json()
+            self.assertEqual(listings['items'], [])
+            edit = self.client.put(f'/api/market/mine/{gift_id}/offer', json={'currency': 'RUB', 'price': '1', 'previous': resale})
+            self.assertEqual(edit.status_code, 409)
+            buy = self.client.post(f'/api/market/offers/{resale}/buy', headers={'X-Dev-User': '2'})
+            self.assertEqual(buy.status_code, 409)
+            self.assertEqual(self.client.delete(f'/api/market/offers/{resale}').status_code, 200)
 
     def test_imported_negative_id_has_details_and_image(self):
         response = self.client.get('/api/market/listings/-999502916')
