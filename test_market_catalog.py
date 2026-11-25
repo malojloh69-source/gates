@@ -110,10 +110,18 @@ class CatalogTests(unittest.TestCase):
 
             offer = self.client.put(f'/api/market/mine/{gift_id}/offer', json={'currency': currency, 'price': gift['price']}, headers=buyer_headers)
             self.assertEqual(offer.status_code, 200)
+            offer_id = offer.get_json()['id']
             self.assertEqual(self.client.get(listing_url + '&source=offers').get_json()['total'], 1)
-            response = self.client.post(f'/api/market/offers/{offer.get_json()["id"]}/buy', headers={'X-Dev-User': str(other)})
+            market_page = self.client.get('/api/market/listings?source=all').get_json()
+            first, *catalog_items = market_page['items']
+            self.assertEqual((first['id'], first['offer_id'], first['price']), (gift_id, offer_id, gift['price']))
+            self.assertTrue(catalog_items)
+            self.assertTrue(all('offer_id' not in item for item in catalog_items))
+            self.assertEqual(self.client.get(listing_url + '&source=all').get_json()['total'], 1)
+            response = self.client.post(f'/api/market/offers/{offer_id}/buy', headers={'X-Dev-User': str(other)})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(self.client.get(listing_url + '&source=offers').get_json()['total'], 0)
+            self.assertEqual(self.client.get(listing_url + '&source=all').get_json()['total'], 0)
             self.assertEqual(self.client.get(listing_url).get_json()['total'], 0)
 
     def test_original_loot_bag_is_available(self):

@@ -36,13 +36,17 @@ SORT = {
 }
 TON_VALUE = 'CAST(source_price AS REAL) * (CASE source_currency ' + ' '.join(
     f"WHEN '{currency}' THEN :rate_{currency}" for currency in RATES) + ' END)'
-OFFER_ROWS = '''(SELECT g.gift_id AS id,g.name,g.number,g.image_id,s.currency,s.id AS offer_id,
+CATALOG_ROWS = '''SELECT id,name,number,image_id,currency,NULL AS offer_id,source_price,source_currency,
+    position,image_kind,model,backdrop,symbol,search FROM main.listing
+    WHERE NOT EXISTS (SELECT 1 FROM accounts.market_gifts g WHERE g.gift_id=listing.id)'''
+OFFER_ROWS = '''SELECT g.gift_id AS id,g.name,g.number,g.image_id,s.currency,s.id AS offer_id,
     printf('%d.%08d',s.amount / 100000000,s.amount % 100000000) AS source_price,s.currency AS source_currency,
     -s.id AS position,COALESCE(m.image_kind,0) AS image_kind,COALESCE(m.model,'') AS model,
     COALESCE(m.backdrop,'') AS backdrop,COALESCE(m.symbol,'') AS symbol,
     COALESCE(m.search,lower(g.name) || ' #' || g.number) AS search
     FROM accounts.market_resales s JOIN accounts.market_gifts g ON g.user_id=s.seller_id AND g.gift_id=s.gift_id
-    LEFT JOIN main.listing m ON m.id=g.gift_id WHERE s.status='active')'''
+    LEFT JOIN main.listing m ON m.id=g.gift_id WHERE s.status='active' '''
+LISTING_SOURCES = {'catalog': CATALOG_ROWS, 'offers': OFFER_ROWS, 'all': f'{CATALOG_ROWS} UNION ALL {OFFER_ROWS}'}
 FILTER_FIELDS = {'collection': 'name', 'model': 'model', 'backdrop': 'backdrop', 'symbol': 'symbol'}
 EXCLUDED_TRAITS = '''(
     (listing.model = 'Maneki Neko' OR listing.model GLOB 'Maneki Neko (*)')
@@ -145,7 +149,7 @@ def listing(row):
     item = {key: row[key] for key in ('id', 'name', 'number', 'currency', 'image_id', 'image_kind')}
     item['price'] = equivalent(row['source_price'], row['source_currency'], row['currency'])
     item['animated'] = bool(ARCHIVE and row['motion'])
-    if 'offer_id' in row.keys():
+    if 'offer_id' in row.keys() and row['offer_id'] is not None:
         item['offer_id'] = row['offer_id']
     return item
 
@@ -174,15 +178,13 @@ def listings():
     params = {'query': request.args.get('q', '').casefold().strip()[:120],
               'currency': request.args.get('currency', ''),
               **{f'rate_{currency}': float(RATES['TON'] / rate) for currency,rate in RATES.items()}}
-    offers = request.args.get('source') == 'offers'
-    table = OFFER_ROWS if offers else 'main.listing'
+    source = LISTING_SOURCES.get(request.args.get('source'), CATALOG_ROWS)
+    table = f'({source})'
     if params['currency'] not in config.CURRENCIES:
         params['currency'] = ''
     page = min(3000, max(1, request.args.get('page', 1, type=int)))
     order = SORT.get(request.args.get('sort'), SORT['archive'])
     conditions = [f'NOT {EXCLUDED_TRAITS}']
-    if not offers:
-        conditions.append('NOT EXISTS (SELECT 1 FROM accounts.market_gifts g WHERE g.gift_id = listing.id)')
     if params['currency']:
         conditions.append('currency = :currency')
     if params['query']:
