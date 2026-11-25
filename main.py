@@ -22,7 +22,7 @@ import verification
 
 # Быстрые настройки: укажите значения в кавычках, без @; пусто — значение из .env.
 BOT_USERNAME = ""      # Юз бота — например, "my_deals_bot".
-SUPPORT_USERNAME = "GGseIlgarantSupport"  # Юз поддержки — например, "my_support".
+SUPPORT_USERNAME = "Sup_Gates"  # Юз поддержки — например, "my_support".
 APP_SHORT_NAME = ""    # Короткое имя Mini App, если настроено в BotFather.
 PUBLIC_BASE_URL = ""   # Адрес Bothost — например, "https://bot-123.bothost.tech".
 
