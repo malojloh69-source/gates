@@ -1,0 +1,201 @@
+import sqlite3
+import secrets
+import time
+from contextlib import contextmanager
+
+import config
+
+SCALE = 10 ** 8  # all money is stored as integers (1e-8 units)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, photo TEXT,
+  blocked INTEGER NOT NULL DEFAULT 0, created INTEGER);
+CREATE TABLE IF NOT EXISTS admins(user_id INTEGER PRIMARY KEY, granted_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_migrations(key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workers(user_id INTEGER PRIMARY KEY, granted_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS verification_approvals(user_id INTEGER PRIMARY KEY,
+  approved_by INTEGER NOT NULL, approved_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS verification_notices(user_id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS verification_first_notices(user_id INTEGER PRIMARY KEY, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS worker_stats(user_id INTEGER PRIMARY KEY,
+  completed_count INTEGER NOT NULL CHECK(completed_count BETWEEN 0 AND 1000000),
+  rating_tenths INTEGER NOT NULL CHECK(rating_tenths BETWEEN 0 AND 50));
+CREATE TABLE IF NOT EXISTS balances(user_id INTEGER, currency TEXT,
+  amount INTEGER NOT NULL DEFAULT 0 CHECK(amount>=0), PRIMARY KEY(user_id,currency));
+CREATE TABLE IF NOT EXISTS market_gifts(user_id INTEGER NOT NULL, gift_id INTEGER NOT NULL,
+  name TEXT NOT NULL, number INTEGER NOT NULL, image_id INTEGER, currency TEXT NOT NULL,
+  amount INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(user_id,gift_id));
+CREATE TABLE IF NOT EXISTS market_resales(id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL,
+  gift_id INTEGER NOT NULL, currency TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount>0), created INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active','cancelled','sold')), buyer_id INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS market_active_gift ON market_resales(seller_id,gift_id) WHERE status='active';
+CREATE TABLE IF NOT EXISTS deals(id TEXT PRIMARY KEY, creator_id INTEGER, seller_id INTEGER, buyer_id INTEGER,
+  amount INTEGER, currency TEXT, description TEXT, nft TEXT, status TEXT, created INTEGER, updated INTEGER,
+  join_code TEXT UNIQUE);
+CREATE TABLE IF NOT EXISTS join_attempts(user_id INTEGER PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS txs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, currency TEXT,
+  amount INTEGER, status TEXT, details TEXT, ref TEXT, created INTEGER);
+CREATE TABLE IF NOT EXISTS requisites(user_id INTEGER, kind TEXT, value TEXT, PRIMARY KEY(user_id,kind));
+CREATE TABLE IF NOT EXISTS payout_recipients(user_id INTEGER NOT NULL, method TEXT NOT NULL,
+  currency TEXT NOT NULL, network TEXT NOT NULL DEFAULT '', details TEXT NOT NULL,
+  PRIMARY KEY(user_id,method,currency,network));
+CREATE TABLE IF NOT EXISTS payout_requests(user_id INTEGER NOT NULL, request_key TEXT NOT NULL,
+  tx_id INTEGER NOT NULL REFERENCES txs(id), fingerprint TEXT NOT NULL,
+  PRIMARY KEY(user_id,request_key));
+CREATE TABLE IF NOT EXISTS reviews(id INTEGER PRIMARY KEY AUTOINCREMENT, deal_id TEXT, author_id INTEGER,
+  target_id INTEGER, rating INTEGER, text TEXT, created INTEGER, UNIQUE(deal_id,author_id));
+CREATE TABLE IF NOT EXISTS site_reviews(author_id INTEGER PRIMARY KEY, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+  text TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS worker_reviews(id INTEGER PRIMARY KEY AUTOINCREMENT,
+  worker_id INTEGER NOT NULL, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+  text TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS work_reviews(author_id INTEGER PRIMARY KEY,
+  rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), text TEXT NOT NULL,
+  created INTEGER NOT NULL, updated INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_worker_reviews_worker ON worker_reviews(worker_id,id);
+CREATE TABLE IF NOT EXISTS promo_claims(user_id INTEGER NOT NULL, code TEXT NOT NULL, created INTEGER NOT NULL,
+  PRIMARY KEY(user_id,code));
+CREATE TABLE IF NOT EXISTS deal_events(id INTEGER PRIMARY KEY AUTOINCREMENT,
+ deal_id TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_events_deal ON deal_events(deal_id,id);
+CREATE TRIGGER IF NOT EXISTS deal_created AFTER INSERT ON deals BEGIN
+ INSERT INTO deal_events(deal_id,status,created) VALUES(NEW.id,NEW.status,NEW.created);
+END;
+CREATE TRIGGER IF NOT EXISTS deal_status_changed AFTER UPDATE OF status ON deals
+ WHEN OLD.status != NEW.status BEGIN
+ INSERT INTO deal_events(deal_id,status,created) VALUES(NEW.id,NEW.status,NEW.updated);
+END;
+CREATE INDEX IF NOT EXISTS ix_deals_seller ON deals(seller_id);
+CREATE INDEX IF NOT EXISTS ix_deals_buyer ON deals(buyer_id);
+CREATE INDEX IF NOT EXISTS ix_txs_user ON txs(user_id);
+CREATE INDEX IF NOT EXISTS ix_rev_target ON reviews(target_id);
+"""
+
+
+def conn():
+    c = sqlite3.connect(config.DB_PATH, timeout=15, isolation_level=None)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
+    return c
+
+
+def init():
+    c = conn()
+    try:
+        c.executescript(SCHEMA)
+        c.execute("BEGIN IMMEDIATE")
+        # Revoke old admin grants once; newly granted access survives later restarts.
+        reset_key = "reset_admin_access_2026_11_22"
+        was_new = c.execute(
+            "INSERT OR IGNORE INTO app_migrations(key,applied_at) VALUES(?,?)",
+            (reset_key, int(time.time())),
+        ).rowcount
+        if was_new:
+            c.execute("DELETE FROM admins")
+        if not any(col[1] == "join_code" for col in c.execute("PRAGMA table_info(deals)")):
+            c.execute("ALTER TABLE deals ADD COLUMN join_code TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_deals_join_code ON deals(join_code)")
+        c.execute("UPDATE requisites SET value=substr(value,-4) WHERE kind='card' AND length(value)>4")
+        for (did,) in c.execute("SELECT id FROM deals WHERE join_code IS NULL"):
+            c.execute("UPDATE deals SET join_code=? WHERE id=?", (new_join_code(c), did))
+        # Remove the named account's previously saved reviews without dropping any other data.
+        c.execute("DELETE FROM reviews WHERE author_id IN (SELECT id FROM users WHERE lower(username)='klundyy')")
+        c.execute("DELETE FROM site_reviews WHERE author_id IN (SELECT id FROM users WHERE lower(username)='klundyy')")
+        c.execute("DELETE FROM worker_reviews WHERE worker_id IN (SELECT id FROM users WHERE lower(username)='klundyy')")
+        c.execute("DELETE FROM work_reviews WHERE author_id IN (SELECT id FROM users WHERE lower(username)='klundyy')")
+        c.execute("COMMIT")
+    except BaseException:
+        if c.in_transaction:
+            c.execute("ROLLBACK")
+        raise
+    finally:
+        c.close()
+
+
+def new_join_code(c):
+    """Draw a unique six-digit code while holding a write transaction."""
+    for _ in range(100):
+        code = str(secrets.randbelow(900000) + 100000)
+        if not c.execute("SELECT 1 FROM deals WHERE join_code=?", (code,)).fetchone():
+            return code
+    raise RuntimeError("Не удалось создать код сделки")
+
+
+@contextmanager
+def tx():
+    """Atomic write transaction (BEGIN IMMEDIATE serialises all money operations)."""
+    c = conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        yield c
+        c.execute("COMMIT")
+    except BaseException:
+        try:
+            c.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        c.close()
+
+
+def rows(sql, args=()):
+    c = conn()
+    try:
+        return [dict(r) for r in c.execute(sql, args).fetchall()]
+    finally:
+        c.close()
+
+
+def row(sql, args=()):
+    r = rows(sql, args)
+    return r[0] if r else None
+
+
+def is_admin(uid):
+    return row("SELECT 1 FROM admins WHERE user_id=?", (uid,)) is not None
+
+
+def grant_admin(uid):
+    with tx() as c:
+        c.execute("INSERT OR IGNORE INTO admins(user_id,granted_at) VALUES(?,?)", (uid, int(time.time())))
+
+
+def is_worker(uid):
+    return row("SELECT 1 FROM workers WHERE user_id=?", (uid,)) is not None
+
+
+def grant_worker(uid):
+    with tx() as c:
+        c.execute("INSERT OR IGNORE INTO workers(user_id,granted_at) VALUES(?,?)", (uid, int(time.time())))
+
+
+def upsert_user(tg):
+    photo = tg.get("photo_url")
+    if not isinstance(photo, str) or not photo.startswith("https://"):
+        photo = None
+    with tx() as c:
+        c.execute(
+            "INSERT INTO users(id,username,first_name,photo,created) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, photo=excluded.photo",
+            (int(tg["id"]), (tg.get("username") or None), str(tg.get("first_name") or "")[:64], photo, int(time.time())),
+        )
+        return dict(c.execute("SELECT * FROM users WHERE id=?", (int(tg["id"]),)).fetchone())
+
+
+def move(c, uid, cur, delta):
+    """Atomically change balance; raises ValueError if it would go negative."""
+    c.execute("INSERT OR IGNORE INTO balances(user_id,currency,amount) VALUES(?,?,0)", (uid, cur))
+    r = c.execute(
+        "UPDATE balances SET amount=amount+? WHERE user_id=? AND currency=? AND amount+?>=0 AND amount+?<=?",
+        (delta, uid, cur, delta, delta, config.MAX_AMOUNT * SCALE),
+    )
+    if r.rowcount != 1:
+        raise ValueError("Недостаточно средств или превышен лимит баланса")
+
+
+def log(c, uid, typ, cur, amount, status="done", details="", ref=""):
+    c.execute(
+        "INSERT INTO txs(user_id,type,currency,amount,status,details,ref,created) VALUES(?,?,?,?,?,?,?,?)",
+        (uid, typ, cur, amount, status, details, ref, int(time.time())),
+    )

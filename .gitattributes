@@ -1,0 +1,3 @@
+media/*.bin -text
+*.mp4 -text
+*.sqlite3 -text
