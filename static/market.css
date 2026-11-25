@@ -6,6 +6,14 @@
 
 .market-header h1 { margin: 12px 0 5px; }
 .market-header p { margin: 0 0 18px; color: var(--mut); font-size: 13px; }
+.market-withdraw-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.market-withdraw-header h1 { margin: 0; }
+.market-withdraw-header .btn { flex-shrink: 0; }
+.market-withdraw-header .ic { width: 16px; height: 16px; }
+.market-withdraw { text-align: center; }
+.market-withdraw h2 { padding: 0 22px; }
+.market-withdraw video { display: block; width: 128px; height: 128px; margin: 16px auto; border-radius: 18px; background: #000; }
+.market-withdraw p { font-size: 16px; line-height: 1.4; }
 .market-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
 .market-heading .market-inventory { flex:none; margin-top:9px; border-radius:50%; background:var(--gs); }
 .market-inventory img { width:25px; height:25px; }

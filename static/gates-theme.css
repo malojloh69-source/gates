@@ -269,7 +269,8 @@ select{appearance:none;padding-right:26px;background-image:url("data:image/svg+x
 .gates-profile-balance strong{margin-top:4px}
 .gates-account-panel .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0}
 .profile-portfolio{margin-top:25px}
-.profile-portfolio h2{font-size:18px;font-weight:550;border-bottom:1px solid var(--line);padding-bottom:14px;margin:0 0 14px}
+.profile-portfolio .market-withdraw-header{border-bottom:1px solid var(--line);padding-bottom:14px}
+.profile-portfolio h2{font-size:18px;font-weight:550;margin:0}
 .profile-empty{min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:15px;color:var(--mut);font-size:14px}
 .profile-empty .ic{width:56px;height:56px;color:#5299cc;stroke-width:1.2}
 .profile-nft{text-align:left;min-width:0;padding:4px;border-radius:18px;background:var(--card)}

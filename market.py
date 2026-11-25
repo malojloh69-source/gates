@@ -64,8 +64,9 @@ def equivalent(price, source_currency, currency):
 
 
 def purchase(user_id, ids):
+    placeholders = ','.join('?' for _ in ids)
     with catalog() as connection:
-        rows = connection.execute(f'SELECT * FROM listing WHERE id IN ({",".join("?" for _ in ids)})', ids).fetchall()
+        rows = connection.execute(f'SELECT * FROM listing WHERE id IN ({placeholders})', ids).fetchall()
     if len(rows) != len(ids):
         raise ValueError('Подарок не найден')
     totals, gifts = {}, []
@@ -80,6 +81,8 @@ def purchase(user_id, ids):
     if any(total > config.MAX_AMOUNT * db.SCALE for total in totals.values()):
         raise ValueError('Недостаточно средств на балансе')
     with db.tx() as connection:
+        if connection.execute(f'SELECT 1 FROM market_gifts WHERE gift_id IN ({placeholders}) LIMIT 1', ids).fetchone():
+            raise LookupError('Этот подарок уже куплен')
         connection.executemany('INSERT INTO market_gifts VALUES (?,?,?,?,?,?,?,?)', gifts)
         for currency, total in totals.items():
             db.move(connection, user_id, currency, -total)
@@ -165,6 +168,8 @@ def listings():
     page = min(3000, max(1, request.args.get('page', 1, type=int)))
     order = SORT.get(request.args.get('sort'), SORT['archive'])
     conditions = []
+    if not offers:
+        conditions.append('NOT EXISTS (SELECT 1 FROM accounts.market_gifts g WHERE g.gift_id = listing.id)')
     if params['currency']:
         conditions.append('currency = :currency')
     if params['query']:
@@ -192,8 +197,8 @@ def listings():
             conditions.append(f'{TON_VALUE} {operator} :{key}')
     where = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
     with catalog() as connection:
-        if offers:
-            connection.execute('ATTACH DATABASE ? AS accounts', (Path(config.DB_PATH).resolve().as_uri() + '?mode=ro',))
+        connection.execute('ATTACH DATABASE ? AS accounts', (Path(config.DB_PATH).resolve().as_uri() + '?mode=ro',))
+        connection.execute('BEGIN')
         count = connection.execute(f'SELECT COUNT(*) FROM {table} AS listing {where}', params).fetchone()[0]
         pages = max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE)
         page = min(page, pages)
@@ -270,6 +275,8 @@ def previews(kind):
 
 @market.get('/api/market/listings/<int(signed=True):gift_id>')
 def gift(gift_id):
+    if -2**63 <= gift_id < 2**63 and db.row('SELECT 1 FROM market_gifts WHERE gift_id = ? LIMIT 1', (gift_id,)):
+        return jsonify(error='Этот подарок уже куплен'), 404
     with catalog() as connection:
         row = connection.execute("SELECT listing.*, COALESCE(image.motion, '') AS motion FROM listing LEFT JOIN image ON image.id=listing.image_id WHERE listing.id=?",
                                  (str(gift_id),)).fetchone()

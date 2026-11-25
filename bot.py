@@ -72,6 +72,6 @@ def handle(update):
         "chat_id": chat["id"], "video": config.PUBLIC_BASE_URL + f"/static/assets/gates_banner_{language}.mp4?v=gates1",
         "caption": welcome_text(language), "parse_mode": "HTML",
         "reply_markup": {"inline_keyboard": [[{
-            "text": {"ru": "Открыть Gates", "en": "Open Gates", "uk": "Відкрити Gates"}[language], "style": "success", "web_app": {"url": config.PUBLIC_BASE_URL}
+            "text": {"ru": "Открыть Gates", "en": "Open Gates", "uk": "Відкрити Gates"}[language], "style": "primary", "web_app": {"url": config.PUBLIC_BASE_URL}
         }]]},
     })

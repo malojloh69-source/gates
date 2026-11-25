@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS balances(user_id INTEGER, currency TEXT,
 CREATE TABLE IF NOT EXISTS market_gifts(user_id INTEGER NOT NULL, gift_id INTEGER NOT NULL,
   name TEXT NOT NULL, number INTEGER NOT NULL, image_id INTEGER, currency TEXT NOT NULL,
   amount INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(user_id,gift_id));
+CREATE INDEX IF NOT EXISTS ix_market_gifts_gift ON market_gifts(gift_id);
 CREATE TABLE IF NOT EXISTS market_resales(id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL,
   gift_id INTEGER NOT NULL, currency TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount>0), created INTEGER NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('active','cancelled','sold')), buyer_id INTEGER);
