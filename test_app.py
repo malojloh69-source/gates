@@ -146,7 +146,7 @@ class DealTests(unittest.TestCase):
     bot.handle({'message':{'chat':{'id':98765,'type':'private'},'from':{'id':98765,'first_name':'Пример','username':'example'},'text':'/start'}})
    self.assertEqual(sent[0][0],'sendVideo')
    self.assertEqual(sent[0][1]['reply_markup']['inline_keyboard'][0][0]['web_app']['url'],config.PUBLIC_BASE_URL)
-   self.assertEqual(sent[0][1]['reply_markup']['inline_keyboard'][0][0]['style'],'success')
+   self.assertEqual(sent[0][1]['reply_markup']['inline_keyboard'][0][0]['style'],'primary')
    self.assertEqual(sent[0][1]['video'],config.PUBLIC_BASE_URL+'/static/assets/gates_banner_ru.mp4?v=gates1')
    for language in ('en','uk'):
     with patch.object(bot,'telegram',side_effect=lambda method,payload:sent.append((method,payload))):

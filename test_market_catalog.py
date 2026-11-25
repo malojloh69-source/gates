@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ os.environ['DEV_MODE'] = '1'
 os.environ['PAYMENT_MODE'] = 'sandbox'
 os.environ['DB_PATH'] = str(Path(temporary.name) / 'catalog-test.db')
 from main import app
+import config
 import database as db
 import market
 
@@ -18,6 +20,7 @@ import market
 class CatalogTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
+        self.enterContext(patch.object(config, 'PAYMENT_MODE', 'sandbox'))
 
     def test_all_gifts_are_reachable_by_pagination(self):
         first = self.client.get('/api/market/listings').get_json()
@@ -47,6 +50,40 @@ class CatalogTests(unittest.TestCase):
             purchase.assert_called_once_with(1, [-999502916])
         response = self.client.post('/api/market/buy', json={'ids': [0]}, headers={'X-Dev-User': '1'})
         self.assertEqual(response.status_code, 400)
+
+    def test_catalog_gift_sells_once_and_can_be_resold(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(config, 'DB_PATH', str(Path(directory) / 'market.db')):
+            db.init()
+            gift_id = -999502916
+            listing_url = f'/api/market/listings?ids={gift_id}'
+            gift = self.client.get(listing_url).get_json()['items'][0]
+            currency = gift['currency']
+            start = 1_000_000 * db.SCALE
+            with db.tx() as connection:
+                for user in (1, 2):
+                    db.move(connection, user, currency, start)
+
+            def buy(user):
+                with app.test_client() as client:
+                    result = client.post('/api/market/buy', json={'ids': [gift_id]}, headers={'X-Dev-User': str(user)})
+                    return result.status_code, user
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                (success, buyer), (conflict, other) = sorted(pool.map(buy, (1, 2)))
+            self.assertEqual((success, conflict), (200, 409))
+            buyer_headers = {'X-Dev-User': str(buyer)}
+            self.assertEqual(self.client.get(listing_url).get_json()['total'], 0)
+            self.assertEqual(self.client.get(f'/api/market/listings/{gift_id}').status_code, 404)
+            self.assertEqual([item['id'] for item in self.client.get('/api/market/mine', headers=buyer_headers).get_json()], [gift_id])
+            self.assertEqual(db.row('SELECT amount FROM balances WHERE user_id=? AND currency=?', (other, currency))['amount'], start)
+
+            offer = self.client.put(f'/api/market/mine/{gift_id}/offer', json={'currency': currency, 'price': gift['price']}, headers=buyer_headers)
+            self.assertEqual(offer.status_code, 200)
+            self.assertEqual(self.client.get(listing_url + '&source=offers').get_json()['total'], 1)
+            response = self.client.post(f'/api/market/offers/{offer.get_json()["id"]}/buy', headers={'X-Dev-User': str(other)})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(self.client.get(listing_url + '&source=offers').get_json()['total'], 0)
+            self.assertEqual(self.client.get(listing_url).get_json()['total'], 0)
 
     def test_original_loot_bag_is_available(self):
         response = self.client.get('/static/assets/animations/loot-bag.json')

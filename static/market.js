@@ -18,6 +18,7 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
   const unit = currency => currencyNames[currency] || currency;
   const number = (n,digits=0) => new Intl.NumberFormat(I.locale,{maximumFractionDigits:digits}).format(n);
   const amount = item => number(item.price,{STARS:0,TON:8,USDT:6,BTC:8}[item.currency] ?? 2);
+  const withdrawButton = () => `<button type="button" class="btn s sm" data-act="marketWithdraw">${ico('out')}${t('marketWithdraw')}</button>`;
 
   function image(item, eager=false) {
     return `<span class="market-image" ${item.animated ? `data-market-motion="${item.image_id}"` : ''}>${item.image_id
@@ -140,7 +141,7 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
     owned.clear();
     for (const item of items) owned.set(item.id,item);
     return `<section class="market-page market-detail"><button class="back" data-act="back">${ico('back')}${t('back')}</button>
-      <header class="market-header"><h1>${t('marketMine')}</h1></header>
+      <header class="market-header market-withdraw-header"><h1>${t('marketMine')}</h1>${withdrawButton()}</header>
       ${items.length?`<div class="market-grid">${items.map(item=>`<article class="market-card market-owned-card">
         ${image(item)}<span class="market-card-copy"><strong class="market-name" data-user-text>${esc(item.name)}</strong>
         <span class="market-serial" data-user-text>#${number(item.number)}</span>${price(item.offer_id?{currency:item.offer_currency,price:item.offer_price}:item)}</span>
@@ -301,6 +302,33 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
   A.marketOffer = (id,button) => { const item=offers.get(Number(id)); if (item) basketSheet(true,button,[item]); };
   A.marketOfferDetail = (id,button) => { const item=offers.get(Number(id)); if (item) openGift(item,button); };
   A.marketMine = () => { closeSheet(); go('market-owned'); };
+
+  function withdrawVideo(step) {
+    const path = `/static/assets/animations/gift-withdraw-${step}`;
+    return `<video src="${path}.mp4" poster="${path}.webp" width="128" height="128" muted playsinline
+      ${reduceMotion.matches?'':'autoplay'} ${step==='instructions'?'loop':''} preload="metadata" aria-hidden="true"></video>`;
+  }
+
+  A.marketWithdraw = (_,button) => {
+    const support = getMe()?.support;
+    const opener = button.closest('.gates-account-panel') ? document.querySelector('[data-act="profileDrawer"]') : button;
+    const modal = sheet(`<section class="market-withdraw"><h2 id="market-withdraw-title">${t('marketWithdrawTitle')}</h2>
+      ${withdrawVideo('instructions')}
+      <p>${t('marketWithdrawInstructions')}</p>
+      ${support?`<button type="button" class="btn s" data-act="support">${t('marketWithdrawContact')} <span data-user-text>@${esc(support)}</span></button>`:''}
+      <button type="button" class="btn" data-act="marketWithdrawDone">${t('marketClose')}</button>
+    </section>`,opener);
+    modal.querySelector('[role="dialog"]').setAttribute('aria-labelledby','market-withdraw-title');
+  };
+
+  A.marketWithdrawDone = (_,button) => {
+    const panel = button.closest('.market-withdraw');
+    panel.querySelector('video').pause();
+    panel.innerHTML = `<h2 id="market-withdraw-title">${t('marketWithdrawTitle')}</h2>
+      ${withdrawVideo('confirmation')}<p tabindex="-1">${t('marketWithdrawConfirmation')}</p>`;
+    panel.querySelector('p').focus({preventScroll:true});
+  };
+
   A.marketRecheck = (_,button) => busy(button,async()=>{
     const active=checkoutView;
     await refreshMe();
@@ -315,14 +343,11 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
     errorBox.hidden=true;
     try {
       if (offer) await api(`/market/offers/${offer}/buy`,{method:'POST'});
-      else {
-        await api('/market/buy',{method:'POST',body:{ids}});
-        for (const id of ids) basket.delete(id);
-      }
+      else await api('/market/buy',{method:'POST',body:{ids}});
     } catch (error) {
       errorBox.textContent=error.message;
       errorBox.hidden=false;
-      if (offer && error.status===409) {
+      if (error.status===409) {
         modal.afterClose=()=>render(true);
         button.hidden=true;
         modal.querySelector('[data-act="marketClose"]').hidden=false;
@@ -330,6 +355,16 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
       return;
     }
     checkoutView=null;
+    if (offer) {
+      offers.delete(offer);
+      document.querySelector(`[data-act="marketOfferDetail"][data-arg="${offer}"]`)?.closest('.market-card')?.remove();
+    } else {
+      for (const id of ids) {
+        basket.delete(id);
+        shown.delete(id);
+        document.querySelector(`[data-act="marketOpen"][data-arg="${id}"]`)?.closest('.market-card')?.remove();
+      }
+    }
     syncBasket();
     await refreshMe().catch(()=>{});
     if (!modal.classList.contains('open')) { render(true); return; }
@@ -350,7 +385,7 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
       <form data-market-sell="${id}">
         <label>${t('currency')}<select name="currency">${currencies.map(code=>`<option value="${code}" ${currency===code?'selected':''}>${code==='STARS'?'Stars':code}</option>`).join('')}</select></label>
         <label>${t('marketSalePrice')}<input name="price" inputmode="decimal" required maxlength="22" value="${esc(item.offer_price||item.price)}"></label>
-        <p class="hint">${t('marketVirtualGifts')}</p><button type="submit" class="btn">${t(item.offer_id?'marketSaveOffer':'marketListGift')}</button>
+        <button type="submit" class="btn">${t(item.offer_id?'marketSaveOffer':'marketListGift')}</button>
       </form></div>`,button);
   };
   A.marketCancelOffer = (id,button) => busy(button,async()=>{
@@ -461,7 +496,8 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
   });
   async function profileInventory(){
     const items=await api('/market/mine');owned.clear();for(const item of items)owned.set(item.id,item);
-    return items.length?`<div class="market-grid profile-nfts">${items.map(item=>`<button class="profile-nft" data-act="marketOwnedDetail" data-arg="${item.id}">${image(item)}<strong data-user-text>${esc(item.name)}</strong><small>#${item.number}</small></button>`).join('')}</div>`:`<div class="profile-empty"><lottie-player class="loot-bag" src="/static/assets/animations/loot-bag.json" background="transparent" loop autoplay aria-hidden="true"></lottie-player><b>${t('gatesFirstGift')}</b><p>${t('gatesFirstGiftHint')}</p>${getMe()?.support?`<button class="profile-support" data-act="support" data-user-text>@${esc(getMe().support)}</button>`:''}</div>`;
+    const gifts = items.length?`<div class="market-grid profile-nfts">${items.map(item=>`<button class="profile-nft" data-act="marketOwnedDetail" data-arg="${item.id}">${image(item)}<strong data-user-text>${esc(item.name)}</strong><small>#${item.number}</small></button>`).join('')}</div>`:`<div class="profile-empty"><lottie-player class="loot-bag" src="/static/assets/animations/loot-bag.json" background="transparent" loop autoplay aria-hidden="true"></lottie-player><b>${t('gatesFirstGift')}</b><p>${t('gatesFirstGiftHint')}</p>${getMe()?.support?`<button class="profile-support" data-act="support" data-user-text>@${esc(getMe().support)}</button>`:''}</div>`;
+    return `<header class="market-withdraw-header"><h2>${t('gatesPortfolio')}</h2>${withdrawButton()}</header>${gifts}`;
   }
   A.marketOwnedDetail=(id,button)=>{const item=owned.get(Number(id));if(!item)return;const modal=sheet(`<div class="gates-gift-hero">${image(item,true)}<div class="gates-gift-title"><h2 data-user-text>${esc(item.name)}</h2><span>#${item.number}</span></div></div><button class="btn" data-act="marketMine">${t('marketMine')}</button>`,button);modal.classList.add('gates-gift-overlay');pickerObserver=observeMotion(modal,pickerObserver);};
   return {afterRender,profileInventory};

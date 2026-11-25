@@ -304,12 +304,13 @@ def gift_animation(name):
 
 @app.get("/static/assets/<category>/<name>")
 def payout_asset(category, name):
+    gift_withdraw_media = {f"gift-withdraw-{step}.{ext}" for step in ("instructions", "confirmation") for ext in ("mp4", "webp")}
     public = {
         "banks": {os.path.basename(b["icon"]) for b in payouts.BANKS if b.get("icon")},
         "crypto": {"gram.svg", "ton.png", "usdt.svg", "btc.svg"},
         "currency": {"ru.svg", "ua.svg", "kz.svg", "uz.svg", "by.svg"},
         "payments": {"yoomoney.svg"},
-        "animations": {f"{n}.webm" for n in ("purse", "card", "wallet", "stars", "ru", "en", "uk", "warning", "success")} | {"stars.mp4", "stars.webp", "stars.png", "loot-bag.json"},
+        "animations": {f"{n}.webm" for n in ("purse", "card", "wallet", "stars", "ru", "en", "uk", "warning", "success")} | {"stars.mp4", "stars.webp", "stars.png", "loot-bag.json"} | gift_withdraw_media,
     }
     if name not in public.get(category, set()):
         return err("Не найдено", 404)
@@ -729,8 +730,8 @@ def market_buy():
         return err("Каталог временно недоступен", 503)
     try:
         market.purchase(g.user["id"], ids)
-    except sqlite3.IntegrityError:
-        return err("Этот подарок уже в вашей коллекции", 409)
+    except LookupError as e:
+        return err(str(e), 409)
     except ValueError as e:
         return err(str(e))
     return jsonify(ok=True)
