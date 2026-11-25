@@ -808,7 +808,7 @@ if(document.modelContext?.registerTool){
 }
 // Withdrawal upgrade shares the existing router, authentication and API.
 upgrade=window.GgselPayouts({PG,A,api,go,back,render,refreshMe,getMe:()=>me,getPage:()=>page[0],getCurrency:()=>cur,esc,ico,busy,toast,closeSheet,luhn,currencyLabel,currencyIcon});
-const marketUI=window.GgselMarket({PG,A,api,go,render,sheet,closeSheet,refreshMe,getMe:()=>me,esc,ico,busy,currencyIcon,currencies:CUR});
+const marketUI=window.GgselMarket({PG,A,api,go,render,sheet,closeSheet,refreshMe,getMe:()=>me,openTg,esc,ico,busy,currencyIcon,currencies:CUR});
 verificationUI=window.GgselVerification({PG,A,api,go,render,refreshMe,getMe:()=>me,getPage:()=>page[0],esc,ico,busy,toast,closeSheet,currencyLabel});
 // ------------------------------------------------------------ init
 (async function init() {

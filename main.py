@@ -304,7 +304,7 @@ def gift_animation(name):
 
 @app.get("/static/assets/<category>/<name>")
 def payout_asset(category, name):
-    gift_withdraw_media = {f"gift-withdraw-{step}.{ext}" for step in ("instructions", "confirmation") for ext in ("mp4", "webp")}
+    gift_withdraw_media = {f"gift-withdraw-{step}{suffix}.webp" for step in ("instructions", "confirmation") for suffix in ("", "-still")}
     public = {
         "banks": {os.path.basename(b["icon"]) for b in payouts.BANKS if b.get("icon")},
         "crypto": {"gram.svg", "ton.png", "usdt.svg", "btc.svg"},
