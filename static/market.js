@@ -7,7 +7,7 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
   const filters = {...defaults};
   const basket = new Map(), shown = new Map(), favorites = new Set(), previewCache = new Map();
   const extraTraits = new Set(['backdrop','symbol']);
-  let checkoutView, marketRequest=0, favoritesOnly=false, source='catalog', observer, pickerObserver, picker, extraDraft, extraOpener;
+  let checkoutView, marketRequest=0, favoritesOnly=false, observer, pickerObserver, picker, extraDraft, extraOpener;
   const offers = new Map(), owned = new Map();
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const sortOptions = {archive:'marketSortDefault',low:'marketSortLow',high:'marketSortHigh'};
@@ -31,15 +31,16 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
 
   function card(item,index) {
     const itemAction = item.offer_id ? 'marketOfferDetail' : 'marketOpen';
+    const buyAction = item.offer_id ? 'marketOffer' : 'marketBuyOne';
     const itemId = item.offer_id || item.id;
     return `<article class="market-card">
       <button class="market-card-open" aria-label="${esc(item.name)} #${item.number}" data-act="${itemAction}" data-arg="${itemId}">${image(item,index<4)}
         <span class="market-card-copy"><strong class="market-name" data-user-text>${esc(item.name)}</strong>
           <span class="market-serial" data-user-text>#${item.number}</span></span>
       </button>
-      <div class="market-card-actions">${item.offer_id?`<button class="market-add" data-act="marketOffer" data-arg="${itemId}">${t('marketBuy')}</button>`:
-        `<button class="market-card-buy" data-act="marketBuyOne" data-arg="${item.id}" aria-label="${t('marketBuy')} ${esc(item.name)}">${price(item,true)}</button>
-        <button class="market-add market-add-icon" aria-label="${t(basket.has(item.id)?'marketInBasket':'marketAdd')}" aria-pressed="${basket.has(item.id)}" data-act="marketAdd" data-arg="${item.id}">${ico(basket.has(item.id)?'check':'cart')}</button>`}
+      <div class="market-card-actions">
+        <button class="market-card-buy" data-act="${buyAction}" data-arg="${itemId}" aria-label="${t('marketBuy')} ${esc(item.name)}">${price(item,true)}</button>
+        ${item.offer_id?'':`<button class="market-add market-add-icon" aria-label="${t(basket.has(item.id)?'marketInBasket':'marketAdd')}" aria-pressed="${basket.has(item.id)}" data-act="marketAdd" data-arg="${item.id}">${ico(basket.has(item.id)?'check':'cart')}</button>`}
       </div>
     </article>`;
   }
@@ -78,7 +79,7 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
   PG.market = async () => {
     const request=++marketRequest;
     const params = new URLSearchParams(filters);
-    params.set('source',source);
+    params.set('source','all');
     if (favoritesOnly) params.set('ids',[...favorites].join(','));
     const result = await api('/market/listings?' + params);
     if (request!==marketRequest) return '';
@@ -263,17 +264,17 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
 
   function openGift(item,button){
     const id=item.offer_id||item.id;
+    const buyAction=item.offer_id?'marketOffer':'marketReviewOne';
     const traits=[['marketModel','model',item.model],['gatesSymbol','symbol',item.symbol],['marketBackdrop','backdrop',item.backdrop]];
     const property=(label,key,value)=>{
       const parts=String(value||'').match(/^(.*?)\s*\(([\d.,]+)%\)$/);
       return `<div><dt>${t(label)}</dt><dd><strong data-user-text>${esc(parts?parts[1]:value)}</strong>${parts?`<span class="gates-rarity">${esc(parts[2])}%</span>`:''}${item.trait_prices?.[key]?`<span class="gates-trait-price">${price({price:item.trait_prices[key],currency:item.currency},true)}</span>`:''}</dd></div>`;
     };
-    const modal=sheet(`<div class="gates-gift-detail"><div class="gates-gift-hero">${image(item,true)}<div class="gates-gift-title"><h2 data-user-text>${esc(item.name)}</h2><span>#${item.number}</span></div></div><dl class="gates-gift-properties">${traits.filter(([,key,value])=>value).map(([label,key,value])=>property(label,key,value)).join('')}<div><dt>${t('gatesAveragePrice')}</dt><dd>${price({price:item.average_price||item.price,currency:item.currency},true)}</dd></div></dl><button class="btn gates-gift-buy" data-act="marketReviewOne" data-arg="${id}">${t('gatesBuyFor')} ${price(item,true)}</button></div>`,button);
+    const modal=sheet(`<div class="gates-gift-detail"><div class="gates-gift-hero">${image(item,true)}<div class="gates-gift-title"><h2 data-user-text>${esc(item.name)}</h2><span>#${item.number}</span></div></div><dl class="gates-gift-properties">${traits.filter(([,key,value])=>value).map(([label,key,value])=>property(label,key,value)).join('')}<div><dt>${t('gatesAveragePrice')}</dt><dd>${price({price:item.average_price||item.price,currency:item.currency},true)}</dd></div></dl><button class="btn gates-gift-buy" data-act="${buyAction}" data-arg="${id}">${t('gatesBuyFor')} ${price(item,true)}</button></div>`,button);
     modal.classList.add('gates-gift-overlay');pickerObserver=observeMotion(modal,pickerObserver);
   }
   A.marketOpen=(id,button)=>busy(button,async()=>{let item=shown.get(Number(id));if(!item?.detailLoaded){item=await api('/market/listings/'+id);item.detailLoaded=true;shown.set(item.id,item);}openGift(item,button);});
-  A.marketReviewOne=(id,button)=>{const item=shown.get(Number(id))||offers.get(Number(id));if(item)basketSheet(true,button,[item]);};
-  A.marketSource = value => { source=value; favoritesOnly=false; filters.page=1; render(true); };
+  A.marketReviewOne=(id,button)=>{const item=shown.get(Number(id));if(item)basketSheet(true,button,[item]);};
   A.marketCurrencyMenu = (_,button) => {
     filterModal(`<div class="market-sheet"><h2>${t('currency')}</h2><div class="market-currency-list">
     ${['',...currencies].map(currency=>`<button type="button" data-act="marketCurrency" data-arg="${currency}" aria-pressed="${filters.currency===currency}">
@@ -492,7 +493,14 @@ window.GgselMarket = function ({PG,A,api,go,render,sheet,closeSheet,refreshMe,ge
       if (!item) return;
       busy(form.querySelector('[type="submit"]'),async()=>{
         await api(`/market/mine/${item.id}/offer`,{method:'PUT',body:{currency:form.elements.currency.value,price:form.elements.price.value,previous:item.offer_id}});
-        closeSheet(); render(true);
+        if (!form.closest('.sheet-wrap.open')) return render(true);
+        if (item.offer_id) {
+          closeSheet();
+          return render(true);
+        }
+        Object.assign(filters,defaults);
+        favoritesOnly=false;
+        go('market');
       });
       return;
     }
